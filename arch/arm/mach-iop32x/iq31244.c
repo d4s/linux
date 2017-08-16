@@ -24,6 +24,7 @@
 #include <linux/serial_core.h>
 #include <linux/serial_8250.h>
 #include <linux/mtd/physmap.h>
+#include <linux/i2c.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
 #include <mach/hardware.h>
@@ -72,7 +73,8 @@ static void __init iq31244_timer_init(void)
 		iop_init_time(200000000);
 	} else {
 		/* 33.000 MHz crystal.  */
-		iop_init_time(198000000);
+//		iop_init_time(198000000);
+		iop_init_time(200000000);
 	}
 }
 
@@ -139,24 +141,28 @@ iq31244_pci_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 {
 	int irq;
 
+	printk("PCI %d:%d:%d, slot=%u, pin=%u\n", dev->bus->number,
+			PCI_SLOT(dev->devfn), PCI_FUNC(dev->devfn), slot, pin);
+
 	if (slot == 0) {
 		/* CFlash */
 		irq = IRQ_IOP32X_XINT1;
 	} else if (slot == 1) {
 		/* SATA */
-		irq = IRQ_IOP32X_XINT2;
+		irq = IRQ_IOP32X_XINT0;
 	} else if (slot == 2) {
 		/* PCI-X Slot */
 		irq = IRQ_IOP32X_XINT3;
 	} else if (slot == 3) {
 		/* 82546 GigE */
-		irq = IRQ_IOP32X_XINT0;
+		irq = IRQ_IOP32X_XINT2;
 	} else {
 		printk(KERN_ERR "iq31244_pci_map_irq called for unknown "
 			"device PCI:%d:%d:%d\n", dev->bus->number,
 			PCI_SLOT(dev->devfn), PCI_FUNC(dev->devfn));
 		irq = -1;
 	}
+	printk("\tIRQ: %d\n", irq);
 
 	return irq;
 }
@@ -243,6 +249,16 @@ static struct platform_device iq31244_serial_device = {
 	.resource	= &iq31244_uart_resource,
 };
 
+static struct i2c_board_info __initdata iq31244_i2c_devices[] = {
+	{
+		I2C_BOARD_INFO("lm63", 0x4c),
+	},
+	{
+		I2C_BOARD_INFO("m41st85", 0x68),
+	},
+};
+
+
 /*
  * This function will send a SHUTDOWN_COMPLETE message to the PIC
  * controller over I2C.  We are not using the i2c subsystem since
@@ -285,6 +301,9 @@ void ep80219_power_off(void)
 static void __init iq31244_init_machine(void)
 {
 	register_iop32x_gpio();
+
+	i2c_register_board_info(0, iq31244_i2c_devices, ARRAY_SIZE(iq31244_i2c_devices));
+
 	platform_device_register(&iop3xx_i2c0_device);
 	platform_device_register(&iop3xx_i2c1_device);
 	platform_device_register(&iq31244_flash_device);
