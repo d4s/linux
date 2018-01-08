@@ -27,6 +27,7 @@
 #include <linux/i2c.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
+#include <linux/gpio.h>
 #include <mach/hardware.h>
 #include <asm/cputype.h>
 #include <asm/irq.h>
@@ -39,6 +40,10 @@
 #include <asm/pgtable.h>
 #include <mach/time.h>
 #include "gpio-iop32x.h"
+
+#define POWER_MCU_BOOT_OK	IOP3XX_GPIO_LINE(4)
+#define POWER_MCU_POWER_OFF	IOP3XX_GPIO_LINE(5)
+
 
 /*
  * Until March of 2007 iq31244 platforms and ep80219 platforms shared the
@@ -206,7 +211,7 @@ static struct physmap_flash_data iq31244_flash_data = {
 
 static struct resource iq31244_flash_resource = {
 	.start		= 0xf0000000,
-	.end		= 0xf07fffff,
+	.end		= 0xf0ffffff,
 	.flags		= IORESOURCE_MEM,
 };
 
@@ -259,6 +264,35 @@ static struct i2c_board_info __initdata iq31244_i2c_devices[] = {
 };
 
 
+void iq31244_sabio_reset(enum reboot_mode m, const char *p)
+{
+	gpio_set_value(POWER_MCU_BOOT_OK, 0);
+	gpio_set_value(POWER_MCU_POWER_OFF, 1);
+
+	msleep(200);
+
+	gpio_set_value(POWER_MCU_BOOT_OK, 1);
+	gpio_set_value(POWER_MCU_POWER_OFF, 0);
+
+	while (1)
+		;
+}
+
+void iq31244_sabio_poweroff(void)
+{
+	gpio_set_value(POWER_MCU_BOOT_OK, 0);
+	gpio_set_value(POWER_MCU_POWER_OFF, 1);
+
+	msleep(200);
+
+	gpio_set_value(POWER_MCU_BOOT_OK, 0);
+	gpio_set_value(POWER_MCU_POWER_OFF, 0);
+
+	while (1)
+		;
+}
+
+
 /*
  * This function will send a SHUTDOWN_COMPLETE message to the PIC
  * controller over I2C.  We are not using the i2c subsystem since
@@ -305,7 +339,7 @@ static void __init iq31244_init_machine(void)
 	i2c_register_board_info(0, iq31244_i2c_devices, ARRAY_SIZE(iq31244_i2c_devices));
 
 	platform_device_register(&iop3xx_i2c0_device);
-	platform_device_register(&iop3xx_i2c1_device);
+//	platform_device_register(&iop3xx_i2c1_device);
 	platform_device_register(&iq31244_flash_device);
 	platform_device_register(&iq31244_serial_device);
 	platform_device_register(&iop3xx_dma_0_channel);
@@ -314,9 +348,33 @@ static void __init iq31244_init_machine(void)
 	if (is_ep80219())
 		pm_power_off = ep80219_power_off;
 
-	if (!is_80219())
+	if (!is_80219()) {
 		platform_device_register(&iop3xx_aau_channel);
+		pm_power_off = iq31244_sabio_poweroff;
+	}
 }
+
+static int __init iq31244_sabio_request_gpios(void)
+{
+	int ret;
+
+	ret = gpio_request(POWER_MCU_BOOT_OK, "BOOT OK");
+	if (ret)
+		pr_err("Could not request BOOT_OK GPIO: %d\n", ret);
+
+	ret = gpio_request(POWER_MCU_POWER_OFF, "POWER OFF");
+	if (ret)
+		pr_err("Could not request POWER OFF GPIO: %d\n", ret);
+
+	gpio_direction_output(POWER_MCU_POWER_OFF, 1);
+	gpio_direction_output(POWER_MCU_BOOT_OK, 0);
+	gpio_set_value(POWER_MCU_POWER_OFF, 1);
+	gpio_set_value(POWER_MCU_BOOT_OK, 0);
+
+	return 0;
+}
+device_initcall(iq31244_sabio_request_gpios);
+
 
 static int __init force_ep80219_setup(char *str)
 {
@@ -333,7 +391,7 @@ MACHINE_START(IQ31244, "Intel IQ31244")
 	.init_irq	= iop32x_init_irq,
 	.init_time	= iq31244_timer_init,
 	.init_machine	= iq31244_init_machine,
-	.restart	= iop3xx_restart,
+	.restart	= iq31244_sabio_reset,
 MACHINE_END
 
 /* There should have been an ep80219 machine identifier from the beginning.
